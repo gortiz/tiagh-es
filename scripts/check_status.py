@@ -51,7 +51,7 @@ def main():
             words = count_words(en_text)
             total_words += words
 
-            if es_text:
+            if es_text or not en_text.strip():
                 trans_keys += 1
                 trans_words += words
 
