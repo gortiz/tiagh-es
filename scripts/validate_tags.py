@@ -13,37 +13,47 @@ from typing import Dict, List, Set, Tuple
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TRANSLATIONS_DIR = os.path.join(BASE_DIR, "data", "translations")
 
-BBCODE_PATTERN = re.compile(r"\[/?([a-zA-Z0-9_=#]+)\]")
+BBCODE_TAG_PATTERN = re.compile(r"\[(/?)([a-zA-Z0-9_]+)(?:=[^\]]*|\s+[^\]]*)?\]")
 PLACEHOLDER_PATTERN = re.compile(r"\{[a-zA-Z0-9_]+\}")
 PRINTF_PATTERN = re.compile(r"%[0-9]*\.?[0-9]*[sdif]")
 
+KNOWN_BBCODE_TAGS = {
+    "b", "i", "u", "s", "code", "center", "right", "fill", "indent",
+    "url", "color", "font", "font_size", "outline_size", "outline_color",
+    "table", "cell", "dropcap", "img", "person", "room", "note", "warning",
+    "title", "pageno", "pre", "endgame", "enters", "leaves", "sound", "time", "evidence"
+}
+
 
 def extract_features(text: str) -> Tuple[List[str], List[str], List[str]]:
-    bbcode = BBCODE_PATTERN.findall(text)
-    # Normalize bbcode tag names (strip arguments)
-    norm_bbcode = [tag.split("=")[0].lower() for tag in bbcode]
+    bbcode = []
+    for m in BBCODE_TAG_PATTERN.finditer(text):
+        tag_name = m.group(2).lower()
+        if tag_name not in KNOWN_BBCODE_TAGS:
+            continue
+        is_closing = m.group(1) == "/"
+        bbcode.append(("/" + tag_name) if is_closing else tag_name)
     placeholders = PLACEHOLDER_PATTERN.findall(text)
     printf = PRINTF_PATTERN.findall(text)
-    return norm_bbcode, sorted(placeholders), sorted(printf)
+    return bbcode, sorted(placeholders), sorted(printf)
 
 
 def check_balanced_bbcode(text: str) -> List[str]:
     errors = []
     stack = []
-    # Find all opening and closing tags
-    tags = re.findall(r"\[(/?[a-zA-Z0-9_=#]+)\]", text)
-    for tag in tags:
-        tag_name = tag.split("=")[0].lower()
-        if tag_name.startswith("/"):
-            close_name = tag_name[1:]
+    for m in BBCODE_TAG_PATTERN.finditer(text):
+        tag_name = m.group(2).lower()
+        if tag_name not in KNOWN_BBCODE_TAGS:
+            continue
+        is_closing = m.group(1) == "/"
+        if is_closing:
             if not stack:
-                errors.append(f"Closing tag [/{close_name}] without opening tag")
-            elif stack[-1] != close_name:
-                errors.append(f"Mismatched closing tag [/{close_name}], expected [/{stack[-1]}]")
+                errors.append(f"Closing tag [/{tag_name}] without opening tag")
+            elif stack[-1] != tag_name:
+                errors.append(f"Mismatched closing tag [/{tag_name}], expected [/{stack[-1]}]")
             else:
                 stack.pop()
         else:
-            # Self-closing or special tags? None known in Godot rich text
             stack.append(tag_name)
     if stack:
         errors.append(f"Unclosed BBCode tags: {', '.join('[' + t + ']' for t in stack)}")
