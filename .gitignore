@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+env/
+venv/
+
+# Builds and temporary artifacts
+build/
+dist/
+tools/
+backups/
+*.bak
+scratch/
+.godot/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
