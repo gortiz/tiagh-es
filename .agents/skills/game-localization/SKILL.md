@@ -39,12 +39,17 @@ This skill defines the standard procedure for extracting, translating, validatin
 
 ## 2. Standard Workflow & Automation
 
+### Step 0: Reference Texts (Local Only)
+The repository stores only the Spanish text (`data/translations/<category>.json`, a flat `{key: text}` map).
+The original texts belong to the game and must never be committed. Copy them from a local game installation:
+```bash
+python3 scripts/extract_translations.py "<path/to/game.pck>"   # writes data/reference/ (gitignored)
+```
+
 ### Step 1: Chunking & Preparation
-Split untranslated strings into manageable batches (typically 80–120 entries per batch):
-```python
-# scripts/export_batches.py
-BATCH_SIZE = 100
-# Slices sorted by conversation/scene flow for narrative continuity
+Split untranslated keys into batches (100 entries by default):
+```bash
+python3 scripts/translation_batches.py export --size 100   # writes data/chunks/batch_XX.json (gitignored)
 ```
 
 ### Step 2: Agent Prompt Template (Lightweight Map)
@@ -58,24 +63,17 @@ Task:
 5. Save as: {batch_es_map_file}
 ```
 
-### Step 3: Map Application & Master Merge
-Use a simple script to apply the flat maps back into the dataset:
-```python
-# scripts/apply_es_maps.py
-for map_file in glob.glob("data/chunks/batch_*_es_map.json"):
-    base_file = map_file.replace("_es_map.json", ".json")
-    # merge flat dict into base json list
-```
-
-And merge into master translation file:
-```python
-# scripts/merge_dialogue_batches.py
+### Step 3: Merge
+Merge every `data/chunks/batch_XX_es_map.json` into `data/translations/`:
+```bash
+python3 scripts/translation_batches.py apply
 ```
 
 ### Step 4: Tag & Placeholder QA Validation
 Always run automated syntax checking before building:
 ```bash
 python3 scripts/validate_tags.py
+python3 scripts/check_status.py
 ```
 Ensures:
 - No unclosed BBCode tags.
@@ -83,5 +81,5 @@ Ensures:
 - Untranslated critical IDs inside attributes (e.g. `[room id=AT]`).
 
 ### Step 5: Compilation & Release Packaging
-- Compile translation into engine-native binary format (e.g., Godot `.translation` resource via `godot_translation.py`, or gettext `.mo`).
-- Package into standalone mod patch or release zip with an automated installer script.
+- Compile the translation into Godot's binary `.translation` format: `python3 scripts/build_localization.py`.
+- The Rust installer in `installer/` embeds it. Game scripts are patched at install time from the player's own copy (`installer/src/scripts.rs`); never commit game code.

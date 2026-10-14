@@ -1,71 +1,28 @@
 #!/usr/bin/env python3
 """
-extract_translations.py - Extracts game strings from PCK and organizes translation files.
+extract_translations.py - Copies the original game texts from your game's PCK into
+data/reference/<category>.json, for translators and for the QA tools.
 
-Gathers all strings across EN, FR, DE, JP, ZHCN, merges them, and creates/updates
-structured JSON translation files with English, French, and German reference texts.
-Preserves any existing Spanish translations when re-run.
+The reference holds the English, French and German texts of every message key. It belongs
+to the game, so git ignores it. The Spanish translations in data/translations/ do not change.
 """
 
 import json
 import os
 import sys
-from typing import Dict, List, Tuple, Any
+from typing import Any
 
 from godot_pck import GodotPCK
 from godot_translation import parse_translation_bytes
+from translation_data import CATEGORIES, REFERENCE_DIR, categorize_key, load_es
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
-SOURCE_DIR = os.path.join(DATA_DIR, "source")
-TRANSLATIONS_DIR = os.path.join(DATA_DIR, "translations")
+LANGS = ["en", "fr", "de"]
 
 
-def get_first_string(val: Any) -> str:
+def first_string(val: Any) -> str:
     if isinstance(val, list):
         return val[0] if val else ""
     return str(val) if val is not None else ""
-
-
-def categorize_key(key: str) -> str:
-    """Categorizes a key into one of the translation files."""
-    if key.startswith("room.") or key.startswith("code.") or key in (
-        "extra_calibration_chars", "katherine_char", "room_characters"
-    ):
-        return "rooms"
-
-    if key.startswith("evidence.") or key.startswith("db.ev."):
-        return "evidence"
-
-    if key.startswith("db.hint."):
-        return "hints"
-
-    if key.startswith("db.credit."):
-        return "credits"
-
-    if key.startswith("db.script.") or key.startswith("db."):
-        return "dialogue"
-
-    # Everything else is UI, menus, settings, interface, prompts, interactions
-    return "ui"
-
-
-def load_existing_translations(file_path: str) -> Dict[Tuple[str, str], str]:
-    """Loads existing Spanish translations if the file already exists."""
-    existing = {}
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                items = json.load(f)
-                for item in items:
-                    ctx = item.get("context", "")
-                    k = item.get("key", "")
-                    es = item.get("es", "")
-                    if es:
-                        existing[(ctx, k)] = es
-        except Exception as e:
-            print(f"Warning: Failed to read existing {file_path}: {e}")
-    return existing
 
 
 def main():
@@ -80,90 +37,35 @@ def main():
     print(f"Loading PCK: {pck_path}")
     pck = GodotPCK(pck_path)
 
-    langs = ["en", "fr", "de", "jp", "zhcn"]
-    raw_translations = {}
-
-    for lang in langs:
+    messages = {}
+    for lang in LANGS:
         pck_file = f"text/galley.{lang}.translation"
-        if pck.has_file(pck_file):
-            print(f"Extracting {pck_file}...")
-            parsed = parse_translation_bytes(pck.extract_file(pck_file))
-            raw_translations[lang] = parsed["messages"]
-        else:
-            print(f"Warning: {pck_file} not in PCK")
-            raw_translations[lang] = {}
+        if not pck.has_file(pck_file):
+            print(f"Error: {pck_file} not in PCK")
+            sys.exit(1)
+        messages[lang] = parse_translation_bytes(pck.extract_file(pck_file))["messages"]
 
-    # Union of all keys across all languages
-    all_keys = set()
-    for lang in langs:
-        all_keys.update(raw_translations[lang].keys())
+    keys = set()
+    for lang in LANGS:
+        keys.update(key for ctx, key in messages[lang].keys() if ctx == "")
 
-    print(f"Total unique (context, key) pairs: {len(all_keys)}")
+    reference = {cat: [] for cat in CATEGORIES}
+    for key in sorted(keys):
+        item = {"key": key}
+        item.update({lang: first_string(messages[lang].get(("", key))) for lang in LANGS})
+        reference[categorize_key(key)].append(item)
 
-    os.makedirs(SOURCE_DIR, exist_ok=True)
-    os.makedirs(TRANSLATIONS_DIR, exist_ok=True)
-
-    # Save raw archive in data/source/all_strings.json
-    archive_data = []
-    for ctx, key in sorted(all_keys, key=lambda x: (x[1], x[0])):
-        archive_data.append({
-            "key": key,
-            "context": ctx,
-            "en": get_first_string(raw_translations["en"].get((ctx, key))),
-            "fr": get_first_string(raw_translations["fr"].get((ctx, key))),
-            "de": get_first_string(raw_translations["de"].get((ctx, key))),
-            "jp": get_first_string(raw_translations["jp"].get((ctx, key))),
-            "zhcn": get_first_string(raw_translations["zhcn"].get((ctx, key))),
-        })
-
-    with open(os.path.join(SOURCE_DIR, "all_strings.json"), "w", encoding="utf-8") as f:
-        json.dump(archive_data, f, ensure_ascii=False, indent=2)
-    print(f"Saved full raw archive: {os.path.join(SOURCE_DIR, 'all_strings.json')}")
-
-    # Group into categories
-    categorized_items = {
-        "ui": [],
-        "rooms": [],
-        "evidence": [],
-        "hints": [],
-        "credits": [],
-        "dialogue": []
-    }
-
-    # Load existing translations to preserve progress
-    existing_es = {}
-    for cat in categorized_items.keys():
-        dest_file = os.path.join(TRANSLATIONS_DIR, f"{cat}.json")
-        existing_es.update(load_existing_translations(dest_file))
-
-    for item in archive_data:
-        cat = categorize_key(item["key"])
-        ctx = item["context"]
-        k = item["key"]
-        
-        # Use existing Spanish translation if available
-        es_val = existing_es.get((ctx, k), "")
-        
-        entry = {
-            "key": k,
-            "context": ctx,
-            "en": item["en"],
-            "fr": item["fr"],
-            "de": item["de"],
-            "es": es_val
-        }
-        categorized_items[cat].append(entry)
-
-    # Write categorized files
-    print("\nCategorized files summary:")
-    for cat, items in categorized_items.items():
-        dest_file = os.path.join(TRANSLATIONS_DIR, f"{cat}.json")
-        with open(dest_file, "w", encoding="utf-8") as f:
+    os.makedirs(REFERENCE_DIR, exist_ok=True)
+    print(f"\n{len(keys)} message keys:")
+    for cat, items in reference.items():
+        with open(os.path.join(REFERENCE_DIR, f"{cat}.json"), "w", encoding="utf-8") as f:
             json.dump(items, f, ensure_ascii=False, indent=2)
-        translated = sum(1 for x in items if x["es"].strip())
-        print(f"  {cat}.json: {len(items)} keys ({translated} translated) -> {dest_file}")
+        es = load_es(cat)
+        missing = sum(1 for it in items if it["key"] not in es)
+        stale = len(set(es) - {it["key"] for it in items})
+        print(f"  {cat}: {len(items)} keys, {missing} without Spanish, {stale} Spanish keys no longer in the game")
 
-    print("\nExtraction complete!")
+    print(f"\nReference saved in {REFERENCE_DIR}")
 
 
 if __name__ == "__main__":

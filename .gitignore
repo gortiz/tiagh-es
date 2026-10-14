@@ -23,3 +23,7 @@ agy.sh
 Thumbs.db
 .vscode/
 .idea/
+
+# Rust
+target/
+data/reference/

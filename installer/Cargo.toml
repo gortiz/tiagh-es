@@ -1,0 +1,19 @@
+[package]
+name = "galley-house-es"
+version = "0.1.0"
+edition = "2024"
+description = "Installer for the unofficial Spanish translation of The Incident at Galley House"
+license = "MIT"
+
+[dependencies]
+md-5 = "0.10"
+rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+ruzstd = "0.9.1"
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

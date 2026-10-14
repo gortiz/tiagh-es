@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
 """
 validate_tags.py - Validates BBCode tags, variable tokens, and placeholders between
-source and translated strings to prevent game crashes or UI glitches.
+source and translated strings to prevent game crashes or UI glitches. Needs the local
+reference texts (see scripts/extract_translations.py).
 """
 
-import json
-import os
 import re
 import sys
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Tuple
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TRANSLATIONS_DIR = os.path.join(BASE_DIR, "data", "translations")
+from translation_data import CATEGORIES, load_es, load_reference, source_text
 
 BBCODE_TAG_PATTERN = re.compile(r"\[(/?)([a-zA-Z0-9_]+)(?:=[^\]]*|\s+[^\]]*)?\]")
 PLACEHOLDER_PATTERN = re.compile(r"\{[a-zA-Z0-9_]+\}")
@@ -60,15 +58,13 @@ def check_balanced_bbcode(text: str) -> List[str]:
     return errors
 
 
-def validate_file(path: str) -> List[Dict[str, Any]]:
+def validate_category(category: str) -> List[Dict[str, Any]]:
     issues = []
-    with open(path, "r", encoding="utf-8") as f:
-        items = json.load(f)
-
-    for it in items:
-        key = it.get("key", "")
-        src = it.get("en", "") or it.get("fr", "")
-        trans = it.get("es", "").strip()
+    es = load_es(category)
+    for it in load_reference(category):
+        key = it["key"]
+        src = source_text(it)
+        trans = es.get(key, "").strip()
 
         if not trans:
             continue
@@ -122,19 +118,13 @@ def validate_file(path: str) -> List[Dict[str, Any]]:
 
 
 def main():
-    if not os.path.exists(TRANSLATIONS_DIR):
-        print("Translations directory not found.")
-        sys.exit(1)
-
-    files = sorted([f for f in os.listdir(TRANSLATIONS_DIR) if f.endswith(".json")])
     total_issues = 0
 
     print("Running QA tag and placeholder validation...")
-    for fn in files:
-        path = os.path.join(TRANSLATIONS_DIR, fn)
-        issues = validate_file(path)
+    for cat in CATEGORIES:
+        issues = validate_category(cat)
         if issues:
-            print(f"\n[!] Issues in {fn} ({len(issues)} found):")
+            print(f"\n[!] Issues in {cat}.json ({len(issues)} found):")
             for iss in issues:
                 print(f"  - Key: {iss['key']}")
                 print(f"    Type: {iss['type']} ({iss['details']})")

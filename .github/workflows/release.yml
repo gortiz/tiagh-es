@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  localization:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build translation
+        run: python3 scripts/build_localization.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build
+          path: build/
+
+  installer:
+    needs: localization
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            asset: galley-house-es-linux-x86_64
+          - os: windows-latest
+            asset: galley-house-es-windows-x86_64.exe
+          - os: macos-latest
+            asset: galley-house-es-macos
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: build
+          path: build/
+      - name: Test
+        working-directory: installer
+        run: cargo test --release
+      - name: Build (Linux, static musl)
+        if: runner.os == 'Linux'
+        working-directory: installer
+        run: |
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --target x86_64-unknown-linux-musl
+          cp target/x86_64-unknown-linux-musl/release/galley-house-es "../${{ matrix.asset }}"
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: installer
+        run: |
+          cargo build --release
+          cp target/release/galley-house-es.exe "../${{ matrix.asset }}"
+      - name: Build (macOS, universal)
+        if: runner.os == 'macOS'
+        working-directory: installer
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          lipo -create -output "../${{ matrix.asset }}" \
+            target/aarch64-apple-darwin/release/galley-house-es \
+            target/x86_64-apple-darwin/release/galley-house-es
+          codesign --force --sign - "../${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  publish:
+    needs: installer
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: galley-house-es-*
+          path: dist/
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" --title "${GITHUB_REF_NAME}" --generate-notes
